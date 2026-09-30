@@ -4,7 +4,7 @@ import { db } from "@/db";
 import { getDbHealth } from "@/db/health";
 import { safeQuery } from "@/db/safe";
 import { users } from "@/db/schema";
-import { mailProvider } from "@/lib/mail";
+import { isResendSandbox, mailFrom, mailProvider } from "@/lib/mail";
 import { PasswordForm, ProfileForm } from "@/components/admin/settings-forms";
 import { Badge } from "@/components/ui/badge";
 
@@ -31,10 +31,18 @@ export default async function AdminSettingsPage() {
     { key: "AUTH_GOOGLE_ID / SECRET", ok: googleEnabled, note: "Google sign-in button" },
     {
       key: "RESEND_API_KEY or SMTP_HOST / USER / PASS",
-      ok: mailProvider() !== null,
-      note: mailProvider() ? `Email via ${mailProvider() === "resend" ? "Resend" : "SMTP"} — contact alerts, welcome + new-post emails` : "Email delivery (contact alerts, newsletter) — currently logged only",
+      ok: mailProvider() !== null && !isResendSandbox(),
+      note: !mailProvider()
+        ? "Email delivery (contact alerts, newsletter) — currently logged only"
+        : isResendSandbox()
+          ? `Resend is in TEST MODE: sending from ${mailFrom()} only delivers to ${process.env.CONTACT_TO_EMAIL ?? "your own Resend account email"}. Other subscribers get nothing. Verify a domain at resend.com/domains and set MAIL_FROM to an address on it — or switch to SMTP (Gmail app password).`
+          : `Email via ${mailProvider() === "resend" ? "Resend" : "SMTP"} from ${mailFrom()} — contact alerts, welcome + new-post emails`,
     },
-    { key: "MAIL_FROM", ok: Boolean(process.env.MAIL_FROM), note: "Sender shown to subscribers (optional; falls back to provider default)" },
+    {
+      key: "MAIL_FROM",
+      ok: Boolean(process.env.MAIL_FROM) && !isResendSandbox(),
+      note: process.env.MAIL_FROM ? `Sender: ${process.env.MAIL_FROM}` : "Not set — sender falls back to the provider default (with Resend that means test mode)",
+    },
     { key: "NEXT_PUBLIC_SITE_URL", ok: Boolean(process.env.NEXT_PUBLIC_SITE_URL), note: "Canonical URLs, OG images, email links" },
     { key: "GITHUB_TOKEN", ok: Boolean(process.env.GITHUB_TOKEN), note: "Optional — higher GitHub API limits" },
   ];

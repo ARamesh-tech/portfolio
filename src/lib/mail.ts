@@ -37,33 +37,68 @@ export function mailFrom() {
   return `${site.name} <onboarding@resend.dev>`;
 }
 
+/**
+ * Resend accounts without a verified domain can only send from onboarding@resend.dev, and
+ * only to the account owner's own address. Everything else is rejected with a 403.
+ */
+export function isResendSandbox() {
+  return mailProvider() === "resend" && /@resend\.dev>?$/i.test(mailFrom().trim());
+}
+
+type ResendPayload = {
+  from: string;
+  to: string;
+  subject: string;
+  html: string;
+  text: string;
+  replyTo?: string;
+  headers?: Record<string, string>;
+};
+
 async function sendViaResend(messages: MailMessage[]): Promise<MailResult[]> {
   const { Resend } = await import("resend");
   const resend = new Resend(process.env.RESEND_API_KEY);
   const from = mailFrom();
+
+  const toPayload = (m: MailMessage): ResendPayload => ({
+    from,
+    to: m.to,
+    subject: m.subject,
+    html: m.html,
+    text: m.text,
+    ...(m.replyTo ? { replyTo: m.replyTo } : {}),
+    ...(m.headers ? { headers: m.headers } : {}),
+  });
+
+  const sendOne = async (p: ResendPayload): Promise<MailResult> => {
+    try {
+      const res = await resend.emails.send(p);
+      return res.error ? { ok: false, error: res.error.message } : { ok: true, id: res.data?.id };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  };
+
   const results: MailResult[] = [];
   // Resend's batch endpoint accepts up to 100 messages per call.
   for (let i = 0; i < messages.length; i += 100) {
-    const chunk = messages.slice(i, i + 100);
-    const payload = chunk.map((m) => ({
-      from,
-      to: m.to,
-      subject: m.subject,
-      html: m.html,
-      text: m.text,
-      ...(m.replyTo ? { replyTo: m.replyTo } : {}),
-      ...(m.headers ? { headers: m.headers } : {}),
-    }));
-    try {
-      const res = chunk.length === 1 ? await resend.emails.send(payload[0]!) : await resend.batch.send(payload);
-      if (res.error) {
-        results.push(...chunk.map(() => ({ ok: false as const, error: res.error?.message })));
-      } else {
-        results.push(...chunk.map(() => ({ ok: true as const })));
-      }
-    } catch (err) {
-      results.push(...chunk.map(() => ({ ok: false as const, error: err instanceof Error ? err.message : String(err) })));
+    const chunk = messages.slice(i, i + 100).map(toPayload);
+    if (chunk.length === 1) {
+      results.push(await sendOne(chunk[0]!));
+      continue;
     }
+    try {
+      const res = await resend.batch.send(chunk);
+      if (!res.error) {
+        results.push(...chunk.map(() => ({ ok: true as const })));
+        continue;
+      }
+      console.warn(`[mail] resend batch rejected (${res.error.message}); retrying ${chunk.length} message(s) individually.`);
+    } catch (err) {
+      console.warn(`[mail] resend batch threw (${err instanceof Error ? err.message : String(err)}); retrying individually.`);
+    }
+    // A batch is all-or-nothing, so one rejected recipient would otherwise block everyone else.
+    for (const p of chunk) results.push(await sendOne(p));
   }
   return results;
 }
