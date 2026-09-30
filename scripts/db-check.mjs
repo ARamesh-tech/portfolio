@@ -25,13 +25,22 @@ function loadEnvFile(file) {
 loadEnvFile(".env.local");
 loadEnvFile(".env");
 
-const raw = process.env.DATABASE_URL ?? "";
+// Same normalisation as src/db/index.ts: tolerate `psql '...'`, quotes and whitespace.
+const raw = (process.env.DATABASE_URL ?? "").trim().replace(/^psql\s+/i, "").replace(/^['"]+|['"]+$/g, "").trim();
 if (!raw || raw.includes("<redacted>") || raw.includes("PASSWORD@")) {
   console.error("✗ DATABASE_URL is missing or still contains a placeholder. Set the real Aiven Service URI in .env.local.");
   process.exit(1);
 }
 
-const url = new URL(raw);
+let url;
+try {
+  url = new URL(raw);
+  if (!/^postgres(ql)?:$/.test(url.protocol)) throw new Error("not a postgres:// URL");
+} catch (err) {
+  console.error(`✗ DATABASE_URL is not a valid connection URL (${err.message}).`);
+  console.error("  Expected: postgres://avnadmin:PASSWORD@host.aivencloud.com:PORT/defaultdb?sslmode=require");
+  process.exit(1);
+}
 console.log(`→ Connecting to ${url.hostname}:${url.port || 5432}/${url.pathname.slice(1)} as ${decodeURIComponent(url.username)} …`);
 
 const pool = new pg.Pool({

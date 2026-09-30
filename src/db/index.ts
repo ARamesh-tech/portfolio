@@ -7,14 +7,31 @@ const globalForDb = globalThis as unknown as {
   __schemaReady?: Promise<void>;
 };
 
+/**
+ * Tolerates the usual copy-paste slips when the Aiven URI is pasted into an env var:
+ * a leading `psql `, surrounding quotes, stray whitespace/newlines.
+ */
+export function normalizeDatabaseUrl(raw = process.env.DATABASE_URL ?? "") {
+  return raw
+    .trim()
+    .replace(/^psql\s+/i, "")
+    .replace(/^['"]+|['"]+$/g, "")
+    .trim();
+}
+
 export function isDbConfigured() {
-  const url = process.env.DATABASE_URL ?? "";
-  return url.length > 0 && !url.includes("<redacted>") && !url.includes("PASSWORD@");
+  const url = normalizeDatabaseUrl();
+  if (!url || url.includes("<redacted>") || url.includes("PASSWORD@")) return false;
+  try {
+    const parsed = new URL(url);
+    return /^postgres(ql)?:$/.test(parsed.protocol) && parsed.hostname.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 function createPool() {
-  const raw = process.env.DATABASE_URL!;
-  const url = new URL(raw);
+  const url = new URL(normalizeDatabaseUrl());
   // Aiven uses a self-signed CA; sslmode=require in libpq terms means "encrypt, don't verify".
   return new Pool({
     host: url.hostname,

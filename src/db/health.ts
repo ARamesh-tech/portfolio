@@ -1,13 +1,20 @@
-import { getPool, isDbConfigured } from "./index";
+import { getPool, isDbConfigured, normalizeDatabaseUrl } from "./index";
 
 export type DbHealth = { configured: boolean; ok: boolean; error?: string; latencyMs?: number };
 
 let cached: { at: number; value: DbHealth } | null = null;
 const TTL_MS = 30_000;
 
+function describeUnconfigured() {
+  const url = normalizeDatabaseUrl();
+  if (!url) return "DATABASE_URL is not set.";
+  if (url.includes("<redacted>") || url.includes("PASSWORD@")) return "DATABASE_URL still contains a placeholder password — paste the real Service URI from the Aiven console.";
+  return "DATABASE_URL is not a valid postgres:// URL — it should look like postgres://avnadmin:PASSWORD@host.aivencloud.com:PORT/defaultdb?sslmode=require";
+}
+
 /** Cheap `SELECT 1` probe, cached for 30s. Used for status UI — never for gating queries. */
 export async function getDbHealth(force = false): Promise<DbHealth> {
-  if (!isDbConfigured()) return { configured: false, ok: false, error: "DATABASE_URL is not set (or still contains a placeholder)." };
+  if (!isDbConfigured()) return { configured: false, ok: false, error: describeUnconfigured() };
   if (!force && cached && Date.now() - cached.at < TTL_MS) return cached.value;
   const started = Date.now();
   let value: DbHealth;
