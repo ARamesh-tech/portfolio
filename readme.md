@@ -23,14 +23,15 @@ This README is the operations manual for the project: what every file does, how 
    - [GitHub token](#64-github-token)
 7. [How it works in production](#7-how-it-works-in-production)
 8. [Deploying — Vercel + GitHub auto-deploy](#8-deploying--vercel--github-auto-deploy)
-9. [Data model](#9-data-model)
-10. [Key flows in detail](#10-key-flows-in-detail)
-11. [Admin guide](#11-admin-guide)
-12. [Editing portfolio content](#12-editing-portfolio-content)
-13. [Scripts](#13-scripts)
-14. [Testing & quality checks](#14-testing--quality-checks)
-15. [Troubleshooting](#15-troubleshooting)
-16. [Security notes](#16-security-notes)
+9. [Making a change and getting it live](#9-making-a-change-and-getting-it-live)
+10. [Data model](#10-data-model)
+11. [Key flows in detail](#11-key-flows-in-detail)
+12. [Admin guide](#12-admin-guide)
+13. [Editing portfolio content](#13-editing-portfolio-content)
+14. [Scripts](#14-scripts)
+15. [Testing & quality checks](#15-testing--quality-checks)
+16. [Troubleshooting](#16-troubleshooting)
+17. [Security notes](#17-security-notes)
 
 ---
 
@@ -422,7 +423,94 @@ Changing an env var does **not** rebuild automatically — trigger a redeploy (p
 
 ---
 
-## 9. Data model
+## 9. Making a change and getting it live
+
+This is the day-to-day loop. Once the GitHub ↔ Vercel connection from §8 is in place, **a `git push` to `master` is the deploy** — there is no separate "publish" step.
+
+### The pipeline, end to end
+
+```
+ you                    GitHub                         Vercel                         visitors
+ ───                    ──────                         ──────                         ────────
+ edit code
+ npm run typecheck/lint/build   (optional local gate)
+ git commit
+ git push origin master ──────► master updated
+                                ├─► GitHub Actions "CI & Deploy"
+                                │     • npm ci
+                                │     • typecheck · lint · build   ──► ✓ / ✗ shown on the commit
+                                │
+                                └─► Vercel Git integration (webhook)
+                                      • clones the commit
+                                      • npm ci  →  next build
+                                      • creates a new immutable deployment
+                                      • on success: promotes it to Production
+                                        and points rameshkumaran.vercel.app at it ──────────────► live (~1–2 min)
+```
+
+Every push produces a **new deployment** with its own URL (`portfolio-<hash>-a-rameshs-projects.vercel.app`). Pushes to `master` are promoted to production; pushes to any other branch or a pull request get a **preview URL** and never touch production.
+
+### Step by step
+
+1. **Make the change** locally (component, page, content file, style…).
+2. **Check it** — `npm run dev` for a live preview, then before committing:
+   ```bash
+   npm run typecheck && npm run lint && npm run build
+   ```
+   The same three commands run in CI, so if they pass here they pass there.
+3. **Commit and push**
+   ```bash
+   git add -A
+   git commit -m "feat: describe the change"
+   git push origin master
+   ```
+4. **Watch it deploy** — GitHub → *Actions* tab shows the checks; Vercel → *Deployments* shows *Building → Ready*. You can also run `npx vercel ls` from the terminal.
+5. **Verify** at https://rameshkumaran.vercel.app. Hard-refresh (`Ctrl+Shift+R`) if you still see the old page — the CDN can serve a cached copy of static pages for a moment.
+
+If the build fails, production is **not** touched — the previous deployment keeps serving. Fix the error, commit, push again.
+
+### What kind of change needs what
+
+| You changed… | How it reaches production |
+| --- | --- |
+| Any file under `src/`, `public/`, config files | Commit + push → automatic build & deploy (steps above) |
+| Portfolio copy in `src/content/*.ts` or `src/lib/site.ts` | Same — it's code. Push and it's live after the build. |
+| A **blog post** (write, edit, publish) | No deploy at all. Posts live in Postgres and are edited in `/admin`; saving calls `revalidatePath`, so the public page updates within seconds. |
+| Profile photo `public/images/ramesh.jpg` | Commit + push (same file name keeps every reference working) |
+| An **environment variable** (`DATABASE_URL`, mail keys, …) | Change it in Vercel → Settings → Environment Variables (or `npx vercel env add … --force`), **then redeploy** — env values are baked in at build time. Either push a commit or Deployments → ⋯ → *Redeploy*. |
+| **Database schema** (new column/table) | Edit `src/db/schema.ts` **and** add the matching idempotent DDL in `src/db/bootstrap.ts` (`CREATE TABLE IF NOT EXISTS` / `ALTER TABLE … ADD COLUMN IF NOT EXISTS`). Push; on the first request after deploy `ensureSchema()` applies it to the live Aiven database automatically. No manual migration. |
+| A dependency (`npm install <pkg>`) | Commit both `package.json` **and** `package-lock.json`; CI/Vercel use `npm ci`, which fails if they're out of sync. |
+| The Node version or build command | `package.json` `engines` / Vercel → Settings → Build & Development Settings |
+
+### Previewing before it goes live
+
+Work on a branch and open a pull request:
+
+```bash
+git checkout -b feature/new-section
+# …edit, commit…
+git push -u origin feature/new-section
+```
+
+Vercel comments on the PR with a **preview URL** that uses the *Preview* environment variables (so it talks to the same database — be mindful when testing destructive admin actions). Merge the PR into `master` when happy; the merge commit deploys to production.
+
+### Rolling back
+
+Vercel → Deployments → pick the last good deployment → ⋯ → **Promote to Production** (or `npx vercel rollback`). This swaps the alias instantly, no rebuild. Then fix the code in git so the next push doesn't reintroduce the problem.
+
+### If auto-deploy isn't connected yet
+
+Until §8 is done (GitHub App installed, repo connected — or the three Actions secrets set), the fallback is a manual deploy from your machine after pushing:
+
+```bash
+npx vercel --prod
+```
+
+Everything else in this section still applies; only the trigger differs.
+
+---
+
+## 10. Data model
 
 All tables live in `src/db/schema.ts`; DDL in `src/db/bootstrap.ts` is idempotent so new columns can be added with `ALTER TABLE … ADD COLUMN IF NOT EXISTS`.
 
@@ -438,7 +526,7 @@ All tables live in `src/db/schema.ts`; DDL in `src/db/bootstrap.ts` is idempoten
 
 ---
 
-## 10. Key flows in detail
+## 11. Key flows in detail
 
 ### Sign-in / registration
 `register-form.tsx` → `registerAction` (Zod validate → bcrypt hash → insert user → `signIn("credentials", { redirect:false })`) → returns `redirectTo` → `useAuthRedirect` performs `window.location.assign()` so `useSession()` is fresh. Google uses the standard OAuth redirect. `ADMIN_EMAIL` always receives the `admin` role.
@@ -463,7 +551,7 @@ All tables live in `src/db/schema.ts`; DDL in `src/db/bootstrap.ts` is idempoten
 
 ---
 
-## 11. Admin guide
+## 12. Admin guide
 
 - **Sign in** at `/login` with `ADMIN_EMAIL` (password or Google). The shield icon in the sidebar chip opens `/admin`.
 - **Write a post**: Admin → Posts → New. Markdown on the left, live preview on the right, `Ctrl/⌘+S` saves. Tick **Published** to go live (this triggers the subscriber email once). **Featured** pins it on the home page. **Save & view** opens the public page.
@@ -475,7 +563,7 @@ All tables live in `src/db/schema.ts`; DDL in `src/db/bootstrap.ts` is idempoten
 
 ---
 
-## 12. Editing portfolio content
+## 13. Editing portfolio content
 
 Portfolio copy lives in plain TypeScript so it is easy to edit without touching components:
 
@@ -492,7 +580,7 @@ Blog posts are written in the admin console and stored in Postgres.
 
 ---
 
-## 13. Scripts
+## 14. Scripts
 
 | Command | Purpose |
 | --- | --- |
@@ -506,7 +594,7 @@ Blog posts are written in the admin console and stored in Postgres.
 
 ---
 
-## 14. Testing & quality checks
+## 15. Testing & quality checks
 
 - **CI**: `.github/workflows/ci.yml` runs typecheck, lint and a production build on every push/PR.
 - **Local gate before pushing**: `npm run typecheck && npm run lint && npm run build`.
@@ -514,7 +602,7 @@ Blog posts are written in the admin console and stored in Postgres.
 
 ---
 
-## 15. Troubleshooting
+## 16. Troubleshooting
 
 | Symptom | Cause / fix |
 | --- | --- |
@@ -530,7 +618,7 @@ Blog posts are written in the admin console and stored in Postgres.
 
 ---
 
-## 16. Security notes
+## 17. Security notes
 
 - Secrets live only in `.env.local` (git-ignored) and Vercel env vars. Never commit them; `.env.example` holds placeholders only.
 - Passwords are hashed with bcrypt (cost 12). Sessions are signed JWTs in HttpOnly cookies.
