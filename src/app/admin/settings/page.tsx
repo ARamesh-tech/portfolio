@@ -30,18 +30,22 @@ export default async function AdminSettingsPage() {
     { key: "AUTH_SECRET", ok: Boolean(process.env.AUTH_SECRET), note: "Session signing" },
     { key: "AUTH_GOOGLE_ID / SECRET", ok: googleEnabled, note: "Google sign-in button" },
     {
-      key: "RESEND_API_KEY or SMTP_HOST / USER / PASS",
+      key: "SMTP_HOST / SMTP_USER / SMTP_PASS",
       ok: mailProvider() !== null && !isResendSandbox(),
       note: !mailProvider()
-        ? "Email delivery (contact alerts, newsletter) — currently logged only"
+        ? "Email delivery (contact alerts, newsletter) — currently logged only. Set SMTP_HOST=smtp.gmail.com, SMTP_PORT=587, SMTP_USER and a Gmail App Password as SMTP_PASS."
         : isResendSandbox()
-          ? `Resend is in TEST MODE: sending from ${mailFrom()} only delivers to ${process.env.CONTACT_TO_EMAIL ?? "your own Resend account email"}. Other subscribers get nothing. Verify a domain at resend.com/domains and set MAIL_FROM to an address on it — or switch to SMTP (Gmail app password).`
-          : `Email via ${mailProvider() === "resend" ? "Resend" : "SMTP"} from ${mailFrom()} — contact alerts, welcome + new-post emails`,
+          ? `Resend is in TEST MODE: sending from ${mailFrom()} only delivers to ${process.env.CONTACT_TO_EMAIL ?? "your own Resend account email"}. Other subscribers get nothing. Configure Gmail SMTP (SMTP_HOST / SMTP_USER / SMTP_PASS) — it takes precedence — or verify a domain at resend.com/domains.`
+          : `Email via ${mailProvider() === "smtp" ? `SMTP (${process.env.SMTP_HOST}:${process.env.SMTP_PORT ?? 587})` : "Resend"} from ${mailFrom()} — contact alerts, welcome + new-post emails`,
     },
     {
       key: "MAIL_FROM",
-      ok: Boolean(process.env.MAIL_FROM) && !isResendSandbox(),
-      note: process.env.MAIL_FROM ? `Sender: ${process.env.MAIL_FROM}` : "Not set — sender falls back to the provider default (with Resend that means test mode)",
+      ok: Boolean(process.env.MAIL_FROM) || mailProvider() === "smtp",
+      note: process.env.MAIL_FROM
+        ? `Sender: ${process.env.MAIL_FROM}`
+        : mailProvider() === "smtp"
+          ? `Not set — sending as ${mailFrom()} (Gmail rewrites the From address to the account anyway)`
+          : "Not set — sender falls back to the provider default (with Resend that means test mode)",
     },
     { key: "NEXT_PUBLIC_SITE_URL", ok: Boolean(process.env.NEXT_PUBLIC_SITE_URL), note: "Canonical URLs, OG images, email links" },
     { key: "GITHUB_TOKEN", ok: Boolean(process.env.GITHUB_TOKEN), note: "Optional — higher GitHub API limits" },

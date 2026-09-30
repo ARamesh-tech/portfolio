@@ -18,7 +18,7 @@ This README is the operations manual for the project: what every file does, how 
 5. [Environment variables](#5-environment-variables)
 6. [Connecting external services](#6-connecting-external-services)
    - [Aiven PostgreSQL](#61-aiven-postgresql)
-   - [Email (Resend or SMTP / Gmail)](#62-email-resend-or-smtp--gmail)
+   - [Email (Gmail SMTP — default; Resend optional)](#62-email-gmail-smtp--default-resend-optional)
    - [Google sign-in](#63-google-sign-in)
    - [GitHub token](#64-github-token)
 7. [How it works in production](#7-how-it-works-in-production)
@@ -261,7 +261,7 @@ The portfolio pages still render if `DATABASE_URL` is missing or invalid; the bl
 
 ### Without email
 
-If neither Resend nor SMTP is configured, `sendMail` logs `[mail] skipped …` to the console and returns `{ ok: false, skipped: true }`. Everything else (subscriptions, announcements bookkeeping) still works; announcements are left "unannounced" so they can be sent later once mail is configured and the post is re-published.
+If neither SMTP nor Resend is configured, `sendMail` logs `[mail] skipped …` to the console and returns `{ ok: false, skipped: true }`. Everything else (subscriptions, announcements bookkeeping) still works; announcements are left "unannounced" so they can be sent later once mail is configured and the post is re-published.
 
 ---
 
@@ -276,9 +276,9 @@ If neither Resend nor SMTP is configured, `sendMail` logs `[mail] skipped …` t
 | `ADMIN_PASSWORD` | first run | bootstrap | Seeds the admin's password hash if the user doesn't exist yet. Change it later in `/admin/settings`. |
 | `NEXT_PUBLIC_SITE_URL` | yes | metadata, sitemap, OG, **email links** | `https://arameshkumaran.vercel.app` in production |
 | `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | optional | Auth.js | Google button appears only when both are set |
-| `RESEND_API_KEY` | optional (one mail provider) | `lib/mail.ts` | Resend API key |
-| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_SECURE` | optional (one mail provider) | `lib/mail.ts` | Any SMTP server. Port 465 ⇒ implicit TLS; 587 ⇒ STARTTLS. |
-| `MAIL_FROM` | recommended | `lib/mail.ts` | Sender, e.g. `Ramesh Kumaran <hello@yourdomain.com>`. Falls back to `CONTACT_FROM_EMAIL`, then `SMTP_USER`, then Resend's onboarding address. |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` | for email | `lib/mail.ts` | Gmail: `smtp.gmail.com` / `587` / your Gmail / 16-char **App Password** (§6.2). Any other SMTP server works too; port 465 ⇒ implicit TLS (or set `SMTP_SECURE=true`). |
+| `RESEND_API_KEY` | optional | `lib/mail.ts` | Alternative provider; needs a domain verified in Resend. Ignored when SMTP is configured. |
+| `MAIL_FROM` | recommended | `lib/mail.ts` | Sender, e.g. `A Ramesh Kumaran <rameshkumarana@gmail.com>` (with Gmail it must be the SMTP account). Falls back to `CONTACT_FROM_EMAIL`, then `SMTP_USER`. |
 | `CONTACT_TO_EMAIL` | optional | contact action | Where contact messages are delivered (default: `site.email`) |
 | `GITHUB_TOKEN` | optional | GitHub widget | Raises API rate limit from 60 to 5000 req/h |
 
@@ -300,44 +300,47 @@ All secrets must be set in **both** places: `.env.local` for local development a
 
 Tables are created automatically (`src/db/bootstrap.ts`). To inspect data: `npm run db:studio` (Drizzle Studio) or Aiven's query editor.
 
-### 6.2 Email (Resend or SMTP / Gmail)
+### 6.2 Email (Gmail SMTP — default; Resend optional)
 
-Email powers three things: contact-form notifications to you, the welcome email, and new-post announcements. Pick **one** provider:
+Email powers three things: contact-form notifications to you, the welcome email, and new-post announcements. The site sends through **Gmail SMTP** using an *App Password* — no custom domain required. (Resend is still supported as an alternative, but without a verified domain it only delivers to your own inbox, so it is not the default.)
 
-**Option A — Resend (recommended for production)**
-1. Create an account at resend.com, add and verify your domain (or use `onboarding@resend.dev` for testing — it can only send to your own address).
-2. Resend dashboard → **API Keys → Create API Key** (permission: *Sending access*). Copy the `re_…` value; it is shown only once.
-3. Put the key in **both** places the app reads env vars from:
+**Step 1 — Create a Gmail App Password (once)**
+1. Open [myaccount.google.com/security](https://myaccount.google.com/security) with `rameshkumarana@gmail.com`.
+2. Make sure **2-Step Verification** is **on** (App passwords only exist when it is).
+3. Go to [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) → App name: `Portfolio blog` → **Create**.
+4. Google shows a 16-character code like `abcd efgh ijkl mnop`. Copy it — it is shown only once. This is `SMTP_PASS` (your normal Gmail password will **not** work; spaces in the code are ignored by the app).
 
-   *Local development* — `.env.local` (git-ignored):
-   ```
-   RESEND_API_KEY="re_xxxxxxxxxxxxxxxxxxxxxxxx"
-   MAIL_FROM="Ramesh Kumaran <blog@yourdomain.com>"
-   ```
-   *Production (Vercel)* — either in the dashboard: vercel.com → project **portfolio** → **Settings → Environment Variables → Add** (`RESEND_API_KEY`, tick *Production* and *Preview*, mark it *Sensitive*), or from the terminal:
-   ```bash
-   npx vercel env add RESEND_API_KEY production   # paste the key when prompted
-   npx vercel env add RESEND_API_KEY preview
-   npx vercel env add MAIL_FROM production
-   npx vercel env add MAIL_FROM preview
-   ```
-   Then **redeploy** (push a commit, or Deployments → ⋯ → Redeploy) — env vars are read at build/deploy time.
-4. `MAIL_FROM` must be an address on the domain you verified in Resend (for a first test, `MAIL_FROM="Ramesh Kumaran <onboarding@resend.dev>"` works but only delivers to your own inbox).
-5. Verify: `/admin/settings` → Environment health should show *Email via Resend*. Subscribe with your own email on `/blog` to receive the welcome mail.
+**Step 2 — Put the values where the app reads them**
 
-Never commit the key: `.env*` is git-ignored and `.env.example` must only contain the empty placeholder.
+*Local development* — `.env.local` (git-ignored):
+```
+SMTP_HOST="smtp.gmail.com"
+SMTP_PORT="587"
+SMTP_USER="rameshkumarana@gmail.com"
+SMTP_PASS="abcdefghijklmnop"
+MAIL_FROM="A Ramesh Kumaran <rameshkumarana@gmail.com>"
+CONTACT_TO_EMAIL="rameshkumarana@gmail.com"
+```
 
-**Option B — Gmail SMTP (quick start)**
-1. Google Account → Security → 2-Step Verification → **App passwords** → create one for "Mail".
-2. Set:
-   ```
-   SMTP_HOST=smtp.gmail.com
-   SMTP_PORT=587
-   SMTP_USER=rameshkumarana@gmail.com
-   SMTP_PASS=<16-character app password>
-   MAIL_FROM="Ramesh Kumaran <rameshkumarana@gmail.com>"
-   ```
-   Gmail caps free accounts at roughly 500 recipients/day — fine for a personal blog.
+*Production (Vercel)* — `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER` and `MAIL_FROM` are already set for Production **and** Preview. Only the secret is missing; add it either in the dashboard (vercel.com → project **portfolio** → **Settings → Environment Variables → Add** `SMTP_PASS`, tick *Production* and *Preview*, mark *Sensitive*) or from the terminal:
+```bash
+npx vercel env add SMTP_PASS production   # paste the 16-character app password when prompted
+npx vercel env add SMTP_PASS preview
+```
+Then **redeploy** (push a commit, or Deployments → ⋯ → Redeploy) — env vars are read when a deployment starts.
+
+**Step 3 — Verify**
+- `/admin/settings` → Environment health should show *Email via SMTP (smtp.gmail.com:587) from A Ramesh Kumaran <rameshkumarana@gmail.com>*.
+- Subscribe on `/blog` with a **different** address (e.g. a friend's) and check that the welcome mail arrives; sent mail also appears in the Gmail **Sent** folder.
+- Vercel → Deployments → latest → **Logs**: a failed send is logged as `[mail] … failed via smtp: …`.
+
+Notes:
+- Gmail rewrites the `From` header to the authenticated account, so `MAIL_FROM` must use `rameshkumarana@gmail.com` (the display name is free).
+- Free Gmail accounts can send to roughly **500 recipients per day**; a new-post announcement counts one per subscriber.
+- If you change the Google account password or revoke the app password, create a new one and update `SMTP_PASS` in both places.
+- Never commit secrets: `.env*` is git-ignored and `.env.example` must only contain placeholders.
+
+**Alternative — Resend** (only worth it if you later own a domain): verify the domain at resend.com/domains, set `RESEND_API_KEY` and `MAIL_FROM` to an address on that domain, and remove the `SMTP_*` variables (SMTP takes precedence when both are configured).
 
 The admin **Settings → Environment health** panel shows which provider is active.
 
@@ -433,7 +436,7 @@ npx vercel --prod
 npx vercel env add DATABASE_URL production
 npx vercel env add DATABASE_URL preview
 # … repeat for AUTH_SECRET, AUTH_TRUST_HOST, ADMIN_EMAIL, ADMIN_PASSWORD, NEXT_PUBLIC_SITE_URL,
-#   RESEND_API_KEY or SMTP_*, MAIL_FROM, CONTACT_TO_EMAIL, AUTH_GOOGLE_ID/SECRET, GITHUB_TOKEN
+#   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, MAIL_FROM, CONTACT_TO_EMAIL, AUTH_GOOGLE_ID/SECRET, GITHUB_TOKEN
 npx vercel env pull .env.local      # optional: sync back locally
 ```
 
@@ -627,8 +630,9 @@ Blog posts are written in the admin console and stored in Postgres.
 | Blog says *"The blog database isn't connected yet"* | `DATABASE_URL` is missing or still contains `<redacted>` / `PASSWORD@`. Set the real Aiven URI (§6.1) locally **and** on Vercel, then redeploy. |
 | Blog says *"temporarily unreachable"*; Settings shows *password authentication failed* | Wrong password in `DATABASE_URL`. Copy the Service URI from Aiven again (or reset the `avnadmin` password there). |
 | `npm run db:check` times out | Aiven service powered off, or IP allow-list blocks you / Vercel. |
-| No emails arrive | Settings → Environment health shows "currently logged only" → configure Resend or SMTP (§6.2). With Gmail, use an **App password**, not your account password. Check Vercel function logs for `[mail]`. |
-| **Only my own address receives mail**; other subscribers get nothing | Resend **test mode**: without a verified domain the sender is `onboarding@resend.dev`, and Resend only delivers to the account owner's email (`You can only send testing emails to your own email address`). Fix: verify a domain in Resend and set `MAIL_FROM` to an address on it, or switch to Gmail SMTP (§6.2). Settings → Environment health shows *TEST MODE* while this applies. Welcome emails that failed are retried automatically the next time that reader subscribes. |
+| No emails arrive | Settings → Environment health shows "currently logged only" → `SMTP_PASS` (or another `SMTP_*` value) is missing on Vercel; add it and redeploy (§6.2). Check Vercel function logs for `[mail]`. |
+| `[mail] … failed via smtp: Invalid login` / `535-5.7.8 Username and Password not accepted` | `SMTP_PASS` is your Gmail password or an old/revoked app password. Create a new **App Password** (2-Step Verification must be on) and update `SMTP_PASS` locally and on Vercel. |
+| **Only my own address receives mail**; other subscribers get nothing | You are on Resend **test mode**: without a verified domain the sender is `onboarding@resend.dev` and Resend only delivers to the account owner (`You can only send testing emails to your own email address`). Configure Gmail SMTP (§6.2) — it takes precedence over Resend. Settings → Environment health shows *TEST MODE* while this applies. Welcome emails that failed are retried automatically the next time that reader subscribes. |
 | Announcement not sent for a post | It was published while mail was unconfigured (claim rolled back) → configure mail, unpublish and publish again. Or it was already announced (`announced_at` set) — by design. |
 | Google button missing | Both `AUTH_GOOGLE_ID` and `AUTH_GOOGLE_SECRET` must be set; redirect URI must match exactly. |
 | Deployment shows *"Git author must have access to the project"* | Link the commit email to your GitHub account or set `git config user.email` to your GitHub email (§8). |

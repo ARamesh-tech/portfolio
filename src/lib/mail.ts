@@ -2,9 +2,11 @@ import { site } from "@/lib/site";
 
 /**
  * Outbound email with two interchangeable providers:
- *  - Resend  (RESEND_API_KEY, optional MAIL_FROM on a verified domain)
- *  - SMTP    (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS — e.g. Gmail with an App Password)
- * When neither is configured, sends are skipped and logged so the site keeps working.
+ *  - SMTP    (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS — Gmail with an App Password is the
+ *             default setup for this site; no custom domain required)
+ *  - Resend  (RESEND_API_KEY + MAIL_FROM on a domain verified in Resend)
+ * SMTP wins when both are configured, because a Resend key without a verified domain can only
+ * deliver to the account owner. When neither is configured, sends are skipped and logged.
  */
 
 export type MailMessage = {
@@ -20,9 +22,13 @@ export type MailResult = { ok: true; id?: string } | { ok: false; skipped?: bool
 
 export type MailProvider = "resend" | "smtp" | null;
 
+export function isSmtpConfigured() {
+  return Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+}
+
 export function mailProvider(): MailProvider {
+  if (isSmtpConfigured()) return "smtp";
   if (process.env.RESEND_API_KEY) return "resend";
-  if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) return "smtp";
   return null;
 }
 
@@ -110,9 +116,13 @@ async function sendViaSmtp(messages: MailMessage[]): Promise<MailResult[]> {
     host: process.env.SMTP_HOST,
     port,
     secure: process.env.SMTP_SECURE ? process.env.SMTP_SECURE === "true" : port === 465,
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    // Gmail app passwords are shown with spaces ("abcd efgh ijkl mnop"); tolerate a pasted copy.
+    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS?.replace(/\s+/g, "") },
     pool: true,
     maxConnections: 3,
+    connectionTimeout: 15_000,
+    greetingTimeout: 15_000,
+    socketTimeout: 30_000,
   });
   const from = mailFrom();
   const results: MailResult[] = [];
@@ -145,7 +155,7 @@ export async function sendMany(messages: MailMessage[]): Promise<MailResult[]> {
   if (messages.length === 0) return [];
   const provider = mailProvider();
   if (!provider) {
-    console.warn(`[mail] skipped ${messages.length} email(s) — no RESEND_API_KEY or SMTP_* configured.`);
+    console.warn(`[mail] skipped ${messages.length} email(s) — SMTP_HOST/SMTP_USER/SMTP_PASS (or RESEND_API_KEY) not configured.`);
     return messages.map(() => ({ ok: false, skipped: true }));
   }
   try {
