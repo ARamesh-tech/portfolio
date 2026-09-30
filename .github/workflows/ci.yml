@@ -28,7 +28,7 @@ jobs:
       - run: npm run build
         env:
           # Build-time only; the real values live in Vercel's project settings.
-          NEXT_PUBLIC_SITE_URL: https://rameshkumaran.vercel.app
+          NEXT_PUBLIC_SITE_URL: https://arameshkumaran.vercel.app
           AUTH_SECRET: ci-placeholder-secret
           AUTH_TRUST_HOST: "true"
 
@@ -43,7 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: production
-      url: https://rameshkumaran.vercel.app
+      url: https://arameshkumaran.vercel.app
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}

@@ -2,7 +2,7 @@
 
 Personal portfolio and blog for **A Ramesh Kumaran**, Backend & Data Engineer at Simpplr.
 
-- **Live:** https://rameshkumaran.vercel.app
+- **Live:** https://arameshkumaran.vercel.app (the earlier `rameshkumaran.vercel.app` permanently redirects here)
 - **Stack:** Next.js 16 (App Router, React Server Components, Server Actions, Turbopack) · React 19 · TypeScript · Tailwind CSS v4 · Auth.js v5 · Drizzle ORM · PostgreSQL (Aiven) · Nodemailer / Resend · Vercel
 
 This README is the operations manual for the project: what every file does, how the pieces fit together, how to run it locally, how it behaves in production, and how to connect each external service.
@@ -274,7 +274,7 @@ If neither Resend nor SMTP is configured, `sendMail` logs `[mail] skipped …` t
 | `AUTH_TRUST_HOST` | yes | Auth.js | `true` (required on Vercel / behind proxies) |
 | `ADMIN_EMAIL` | yes | `auth.ts`, bootstrap | This email gets the `admin` role — via password **or** Google |
 | `ADMIN_PASSWORD` | first run | bootstrap | Seeds the admin's password hash if the user doesn't exist yet. Change it later in `/admin/settings`. |
-| `NEXT_PUBLIC_SITE_URL` | yes | metadata, sitemap, OG, **email links** | `https://rameshkumaran.vercel.app` in production |
+| `NEXT_PUBLIC_SITE_URL` | yes | metadata, sitemap, OG, **email links** | `https://arameshkumaran.vercel.app` in production |
 | `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | optional | Auth.js | Google button appears only when both are set |
 | `RESEND_API_KEY` | optional (one mail provider) | `lib/mail.ts` | Resend API key |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_SECURE` | optional (one mail provider) | `lib/mail.ts` | Any SMTP server. Port 465 ⇒ implicit TLS; 587 ⇒ STARTTLS. |
@@ -306,8 +306,26 @@ Email powers three things: contact-form notifications to you, the welcome email,
 
 **Option A — Resend (recommended for production)**
 1. Create an account at resend.com, add and verify your domain (or use `onboarding@resend.dev` for testing — it can only send to your own address).
-2. Create an API key → `RESEND_API_KEY`.
-3. Set `MAIL_FROM="Ramesh Kumaran <blog@yourdomain.com>"` (must be on the verified domain).
+2. Resend dashboard → **API Keys → Create API Key** (permission: *Sending access*). Copy the `re_…` value; it is shown only once.
+3. Put the key in **both** places the app reads env vars from:
+
+   *Local development* — `.env.local` (git-ignored):
+   ```
+   RESEND_API_KEY="re_xxxxxxxxxxxxxxxxxxxxxxxx"
+   MAIL_FROM="Ramesh Kumaran <blog@yourdomain.com>"
+   ```
+   *Production (Vercel)* — either in the dashboard: vercel.com → project **portfolio** → **Settings → Environment Variables → Add** (`RESEND_API_KEY`, tick *Production* and *Preview*, mark it *Sensitive*), or from the terminal:
+   ```bash
+   npx vercel env add RESEND_API_KEY production   # paste the key when prompted
+   npx vercel env add RESEND_API_KEY preview
+   npx vercel env add MAIL_FROM production
+   npx vercel env add MAIL_FROM preview
+   ```
+   Then **redeploy** (push a commit, or Deployments → ⋯ → Redeploy) — env vars are read at build/deploy time.
+4. `MAIL_FROM` must be an address on the domain you verified in Resend (for a first test, `MAIL_FROM="Ramesh Kumaran <onboarding@resend.dev>"` works but only delivers to your own inbox).
+5. Verify: `/admin/settings` → Environment health should show *Email via Resend*. Subscribe with your own email on `/blog` to receive the welcome mail.
+
+Never commit the key: `.env*` is git-ignored and `.env.example` must only contain the empty placeholder.
 
 **Option B — Gmail SMTP (quick start)**
 1. Google Account → Security → 2-Step Verification → **App passwords** → create one for "Mail".
@@ -326,8 +344,8 @@ The admin **Settings → Environment health** panel shows which provider is acti
 ### 6.3 Google sign-in
 
 1. Google Cloud Console → APIs & Services → Credentials → **Create OAuth client ID** (Web application).
-2. Authorised JavaScript origins: `https://rameshkumaran.vercel.app` and `http://localhost:3000`.
-3. Authorised redirect URIs: `https://rameshkumaran.vercel.app/api/auth/callback/google` and `http://localhost:3000/api/auth/callback/google`.
+2. Authorised JavaScript origins: `https://arameshkumaran.vercel.app` and `http://localhost:3000`.
+3. Authorised redirect URIs: `https://arameshkumaran.vercel.app/api/auth/callback/google` and `http://localhost:3000/api/auth/callback/google`.
 4. Set `AUTH_GOOGLE_ID` and `AUTH_GOOGLE_SECRET`. The "Continue with Google" button appears automatically.
 
 If you sign in with Google using `ADMIN_EMAIL`, that account is the admin too (accounts are linked by email).
@@ -365,7 +383,7 @@ Optional. Create a fine-grained token with no scopes (public read) at github.com
 
 ## 8. Deploying — Vercel + GitHub auto-deploy
 
-The Vercel project is `a-rameshs-projects/portfolio` with the production domain `rameshkumaran.vercel.app`.
+The Vercel project is `a-rameshs-projects/portfolio` with the production domain `arameshkumaran.vercel.app` (`rameshkumaran.vercel.app` is kept as a 308 redirect so old links keep working). To rename again: `npx vercel domains add <new>.vercel.app portfolio`, update `NEXT_PUBLIC_SITE_URL`, then set a redirect on the old name in Settings → Domains → Edit.
 
 ### Automatic deploys from GitHub (recommended)
 
@@ -445,7 +463,7 @@ This is the day-to-day loop. Once the GitHub ↔ Vercel connection from §8 is i
                                       • npm ci  →  next build
                                       • creates a new immutable deployment
                                       • on success: promotes it to Production
-                                        and points rameshkumaran.vercel.app at it ──────────────► live (~1–2 min)
+                                        and points arameshkumaran.vercel.app at it ─────────────► live (~1–2 min)
 ```
 
 Every push produces a **new deployment** with its own URL (`portfolio-<hash>-a-rameshs-projects.vercel.app`). Pushes to `master` are promoted to production; pushes to any other branch or a pull request get a **preview URL** and never touch production.
@@ -465,7 +483,7 @@ Every push produces a **new deployment** with its own URL (`portfolio-<hash>-a-r
    git push origin master
    ```
 4. **Watch it deploy** — GitHub → *Actions* tab shows the checks; Vercel → *Deployments* shows *Building → Ready*. You can also run `npx vercel ls` from the terminal.
-5. **Verify** at https://rameshkumaran.vercel.app. Hard-refresh (`Ctrl+Shift+R`) if you still see the old page — the CDN can serve a cached copy of static pages for a moment.
+5. **Verify** at https://arameshkumaran.vercel.app. Hard-refresh (`Ctrl+Shift+R`) if you still see the old page — the CDN can serve a cached copy of static pages for a moment.
 
 If the build fails, production is **not** touched — the previous deployment keeps serving. Fix the error, commit, push again.
 
